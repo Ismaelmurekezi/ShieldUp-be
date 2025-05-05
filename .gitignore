@@ -1,0 +1,5 @@
+.qodo
+__pycache__
+excluded
+.history
+venv
