@@ -4,12 +4,21 @@ import json
 from datetime import datetime
 import requests
 import json
-import threading
+import time
+from dotenv import load_dotenv, find_dotenv
+import os
 
 
-api_key = "MNKpy5NcYeSY9f28TvEp2WKe2lVRkOhtIUpc0w0bz6BRZplKuMMhPdoMyw5xSP91"
+# Load environment variables from .env file
+load_dotenv(find_dotenv())
+mongo_db_base = os.environ.get("MONGODB_URL_BASE")
+api_key = os.environ.get("HTTPSMS_API_KEY")
+url = os.environ.get("HTTPSMS_URL")
+sender = os.environ.get("HTTPSMS_SENDER")
+receivers = os.environ.get("HTTPSMS_RECEIVERS")
 
-url = 'https://api.httpsms.com/v1/messages/send'
+
+
 
 headers = {
     'x-api-key': api_key,
@@ -19,18 +28,19 @@ headers = {
 
 
 
-
 def send_message(payload):
     try:
         response = requests.post(url, headers=headers, data=json.dumps(payload))
         if response.status_code == 200:
             print("✅ Message sent successfully!")
+            time.sleep(1)
         else:
             print(f"⚠️ Failed to send message: {response.status_code} - {response.text}")
     except Exception as e:
         print(str(e))
+
 # MongoDB setup
-client = pymongo.MongoClient("mongodb://localhost:27017/")
+client = pymongo.MongoClient(mongo_db_base)
 db = client["mqtt_logs"]
 collection = db["messages"]
 
@@ -42,6 +52,7 @@ def on_message(client, userdata, msg):
     if "acknowledge" in payload and payload["acknowledge"] == True:
         message_id = payload.get("message_id")
         print(f"✅ Acknowledgment received for message ID: {message_id}")
+
 
         # Update the message status to "acknowledged"
         result = collection.find_one_and_update(
@@ -56,7 +67,7 @@ def on_message(client, userdata, msg):
         return
 
     else:
-        # Log new messages
+       
         log = {
             "topic": topic,
             "payload": payload,
@@ -66,14 +77,17 @@ def on_message(client, userdata, msg):
         }
         collection.insert_one(log)
         print(f"📥 Logged message: {log}")
-        payload = {
-            "content": payload["message"],
-            "from": "+250791105800",
-            "to": "+250732657995"
-        }
-        message_thread= threading.Thread(target=send_message, args=[payload])
-        message_thread.start()
-
+        for reveiver in receivers:
+             # Log new messages
+       
+            msg_payload = {
+                "content": f"Crime type: {payload["message"]}\n\rLocation: {payload["location"]}\n\rFrom: {payload["from"]} \n\r cordinates: https://www.google.com/maps/search/?api=1&query={payload["cords"].split(" ")[0]}",
+                "from": sender,
+                "to": reveiver
+            }
+            send_message(msg_payload)
+            # message_thread= threading.Thread(target=send_message, args=[msg_payload])
+            # message_thread.start()
 # MQTT setup
 mqttc = mqtt.Client()
 mqttc.on_message = on_message
