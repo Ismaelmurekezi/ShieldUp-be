@@ -161,6 +161,51 @@ def login():
     response.set_cookie("access_token", token, httponly=True, secure=True, samesite="Lax")
     return response, 200
 
+# UPDATE OWN ACCOUNT ROUTE
+
+@app.route('/users/update', methods=['PUT'])
+@login_required
+def update_own_account():
+    current_user = request.user
+    if current_user.get("role") != "admin":
+        return jsonify({"message": "You are not authorized"}), 403
+    user_email = request.user["email"]
+    data = request.get_json()
+    
+    update_fields = {key: val for key, val in data.items() if key in ["username", "password","email", "district", "sector"]}
+
+    if "password" in update_fields:
+        update_fields["password"] = bcrypt.generate_password_hash(update_fields["password"]).decode("utf-8")
+
+    result = users_collection.update_one({"email": user_email}, {"$set": update_fields})
+    if result.matched_count == 0:
+        return jsonify({"message": "User not found"}), 404
+
+    return jsonify({"message": "Account updated successfully"}), 200
+
+
+# DELETING ACCOUNT ROUTE
+@app.route('/users/<user_id>', methods=['DELETE'])
+@login_required
+def delete_user(user_id):
+    current_user = request.user
+    if current_user.get("role") != "SuperAdmin":
+        return jsonify({"message": "You are not authorized"}), 403
+    
+    if not ObjectId.is_valid(user_id):
+        return jsonify({"message": "Invalid user ID"}), 400
+
+    user_to_delete = users_collection.find_one({"_id": ObjectId(user_id)})
+    if not user_to_delete:
+        return jsonify({"message": "User not found"}), 404
+
+    if user_to_delete.get("role") == "SuperAdmin":
+        return jsonify({"message": "Cannot delete SuperAdmin"}), 403
+
+    users_collection.delete_one({"_id": ObjectId(user_id)})
+    return jsonify({"message": "User deleted successfully"}), 200
+
+
 
 #Logout route
 
