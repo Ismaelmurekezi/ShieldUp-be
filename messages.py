@@ -32,10 +32,10 @@ def send_message(payload):
     try:
         response = requests.post(url, headers=headers, data=json.dumps(payload))
         if response.status_code == 200:
-            print("✅ Message sent successfully!")
+            print("Message sent successfully!")
             time.sleep(1)
         else:
-            print(f"⚠️ Failed to send message: {response.status_code} - {response.text}")
+            print(f"Failed to send message: {response.status_code} - {response.text}")
     except Exception as e:
         print(str(e))
 
@@ -51,7 +51,7 @@ def on_message(client, userdata, msg):
     # Handle acknowledgment message
     if "acknowledge" in payload and payload["acknowledge"] == True:
         message_id = payload.get("message_id")
-        print(f"✅ Acknowledgment received for message ID: {message_id}")
+        print(f"Acknowledgment received for message ID: {message_id}")
 
 
         # Update the message status to "acknowledged"
@@ -61,9 +61,9 @@ def on_message(client, userdata, msg):
             sort=[("timestamp", -1)]
         )
         if result:
-            print(f"📝 Message updated to 'acknowledged': {result.get('_id')}")
+            print(f"Message updated to 'acknowledged': {result.get('_id')}")
         else:
-            print("⚠️ No unread message found with this ID to acknowledge.")
+            print("No unread message found with this ID to acknowledge.")
         return
 
     else:
@@ -76,7 +76,7 @@ def on_message(client, userdata, msg):
             "message_id": payload.get("message_id")
         }
         collection.insert_one(log)
-        print(f"📥 Logged message: {log}")
+        print(f"Logged message: {log}")
         for reveiver in receivers:
              # Log new messages
        
@@ -93,5 +93,5 @@ mqttc = mqtt.Client()
 mqttc.on_message = on_message
 mqttc.connect("localhost", 1883)
 mqttc.subscribe("device/+/inbox")
-print("✅ Connected to MQTT broker. Waiting for messages...")
+print("Connected to MQTT broker. Waiting for messages...")
 mqttc.loop_forever()
