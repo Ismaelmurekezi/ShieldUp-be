@@ -129,15 +129,15 @@ def generate_user_data(month_index, user_index):
 def seed_users():
     """Create 60 users distributed across 12 months (5 users per month)"""
     
-    print("🌱 Starting user seeding process...")
+    print(" Starting user seeding process...")
     
     # Check if users already exist (excluding superadmin)
     existing_users = users_collection.count_documents({"role": {"$ne": "SuperAdmin"}})
     if existing_users > 0:
-        print(f"⚠️  Found {existing_users} existing users. Do you want to continue? (y/n)")
+        print(f"  Found {existing_users} existing users. Do you want to continue? (y/n)")
         response = input().lower()
         if response != 'y':
-            print("❌ Seeding cancelled.")
+            print(" Seeding cancelled.")
             return
         
         # Clear existing admin users
@@ -149,7 +149,7 @@ def seed_users():
     
     for month_index in range(12):  # 0-11 for 12 months
         month_name = datetime.datetime(2024, month_index + 1, 1).strftime("%B")
-        print(f"📅 Generating users for {month_name} 2024...")
+        print(f" Generating users for {month_name} 2024...")
         
         for user_index in range(users_per_month):
             user_data = generate_user_data(month_index, month_index * users_per_month + user_index)
@@ -158,10 +158,10 @@ def seed_users():
     # Insert all users at once
     try:
         result = users_collection.insert_many(users_to_insert)
-        print(f"✅ Successfully created {len(result.inserted_ids)} users!")
+        print(f" Successfully created {len(result.inserted_ids)} users!")
         
         # Display summary
-        print("\n📊 SEEDING SUMMARY:")
+        print("\n SEEDING SUMMARY:")
         print(f"Total users created: {len(result.inserted_ids)}")
         print("Distribution by month:")
         
@@ -176,17 +176,17 @@ def seed_users():
             print(f"  {month_name}: {count} users")
         
         # Display sample users
-        print("\n👥 SAMPLE USERS CREATED:")
+        print("\n SAMPLE USERS CREATED:")
         sample_users = users_collection.find({"role": "admin"}).limit(5)
         for user in sample_users:
-            print(f"  📧 {user['email']} | {user['username']} | {user['district']}-{user['sector']} | Created: {user['createdAt'].strftime('%Y-%m-%d')}")
+            print(f"   {user['email']} | {user['username']} | {user['district']}-{user['sector']} | Created: {user['createdAt'].strftime('%Y-%m-%d')}")
         
-        print(f"\n🔐 Default password for all users: 'password123'")
-        print("🏙️ All users are located in Kigali districts: Gasabo, Kicukiro, Nyarugenge")
-        print("💡 You can now login with any of the generated email addresses!")
+        print(f"\n Default password for all users: 'password123'")
+        print("All users are located in Kigali districts: Gasabo, Kicukiro, Nyarugenge")
+        print("You can now login with any of the generated email addresses!")
         
     except Exception as e:
-        print(f"❌ Error creating users: {str(e)}")
+        print(f" Error creating users: {str(e)}")
 
 def display_user_stats():
     """Display statistics about created users"""
@@ -196,11 +196,11 @@ def display_user_stats():
         print("📭 No admin users found. Run the seeder first!")
         return
     
-    print(f"\n📊 USER STATISTICS:")
+    print(f"\n USER STATISTICS:")
     print(f"Total admin users: {total_users}")
     
     # Users by Kigali district
-    print("\n🏙️ Users by Kigali District:")
+    print("\n Users by Kigali District:")
     pipeline = [
         {"$match": {"role": "admin"}},
         {"$group": {"_id": "$district", "count": {"$sum": 1}}},
@@ -212,7 +212,7 @@ def display_user_stats():
         print(f"  {stat['_id']}: {stat['count']} users")
     
     # Top sectors
-    print("\n🏘️ Top 10 Sectors:")
+    print("\n Top 10 Sectors:")
     sector_pipeline = [
         {"$match": {"role": "admin"}},
         {"$group": {"_id": "$sector", "count": {"$sum": 1}}},
@@ -225,7 +225,7 @@ def display_user_stats():
         print(f"  {stat['_id']}: {stat['count']} users")
     
     # Users by month
-    print("\n📅 Users by Registration Month:")
+    print("\n Users by Registration Month:")
     for month in range(1, 13):
         month_name = datetime.datetime(2024, month, 1).strftime("%B")
         count = users_collection.count_documents({
@@ -242,7 +242,7 @@ def display_user_stats():
         "role": "admin", 
         "lastLoginAt": {"$exists": True, "$ne": None}
     })
-    print(f"\n🔑 Users who have logged in: {logged_in_users}/{total_users}")
+    print(f"\n Users who have logged in: {logged_in_users}/{total_users}")
 
 if __name__ == "__main__":
     print("🚀 ShieldUp User Seeder")
@@ -261,10 +261,10 @@ if __name__ == "__main__":
         elif choice == "2":
             display_user_stats()
         elif choice == "3":
-            print("👋 Goodbye!")
+            print("Goodbye!")
             break
         else:
-            print("❌ Invalid choice. Please enter 1, 2, or 3.")
+            print("Invalid choice. Please enter 1, 2, or 3.")
     
     # Close MongoDB connection
     client.close()
