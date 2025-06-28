@@ -10,6 +10,11 @@ from flask_cors import CORS
 from dotenv import load_dotenv, find_dotenv
 import os
 import pymongo
+import threading
+import paho.mqtt.client as mqtt
+import json
+import requests
+import time
 
 # Load environment variables from .env file
 load_dotenv(find_dotenv())
@@ -30,6 +35,136 @@ mongo = PyMongo(app)
 bcrypt = Bcrypt(app)
 users_collection = mongo.db.users
 messages_collection = mongo.db.messages
+
+# MQTT and SMS functionality
+class MQTTHandler:
+    def __init__(self):
+        self.client = None
+        self.mongo_client = None
+        self.db = None
+        self.collection = None
+        self.headers = {
+            'x-api-key': api_key,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+        }
+        
+    def setup_mongodb(self):
+        """Setup MongoDB connection for MQTT messages"""
+        try:
+            self.mongo_client = pymongo.MongoClient(mongo_db_base)
+            self.db = self.mongo_client["mqtt_logs"]
+            self.collection = self.db["messages"]
+            print("MQTT MongoDB connection established")
+        except Exception as e:
+            print(f"Failed to connect to MQTT MongoDB: {e}")
+    
+    def send_sms(self, payload):
+        """Send SMS via HTTPSMS API"""
+        try:
+            response = requests.post(url, headers=self.headers, data=json.dumps(payload))
+            if response.status_code == 200:
+                print("SMS sent successfully!")
+                time.sleep(1)
+            else:
+                print(f"Failed to send SMS: {response.status_code} - {response.text}")
+        except Exception as e:
+            print(f"SMS sending error: {str(e)}")
+
+    def on_connect(self, client, userdata, flags, rc):
+        """Callback for when MQTT client connects"""
+        if rc == 0:
+            print("Connected to MQTT broker")
+            client.subscribe("device/+/inbox")
+            print("Subscribed to device/+/inbox")
+        else:
+            print(f"Failed to connect to MQTT broker with code {rc}")
+
+    def on_message(self, client, userdata, msg):
+        """Handle incoming MQTT messages"""
+        try:
+            payload = json.loads(msg.payload.decode())
+            topic = msg.topic
+            print(f"Received message on topic {topic}: {payload}")
+
+            # Handle acknowledgment message
+            if "acknowledge" in payload and payload["acknowledge"] == True:
+                message_id = payload.get("message_id")
+                print(f"Acknowledgment received for message ID: {message_id}")
+
+                # Update the message status to "acknowledged"
+                result = self.collection.find_one_and_update(
+                    {"topic": "device/esp1/inbox", "status": "unread", "message_id": message_id},
+                    {"$set": {"status": "acknowledged", "acknowledged_at": datetime.datetime.utcnow()}},
+                    sort=[("timestamp", -1)]
+                )
+                if result:
+                    print(f"Message updated to 'acknowledged': {result.get('_id')}")
+                else:
+                    print("No unread message found with this ID to acknowledge.")
+                return
+
+            # Log new messages
+            log = {
+                "topic": topic,
+                "payload": payload,
+                "timestamp": datetime.datetime.utcnow(),
+                "status": "unread",
+                "message_id": payload.get("message_id")
+            }
+            self.collection.insert_one(log)
+            print(f"Logged message: {log}")
+
+            # Send SMS notifications
+            if receivers:
+                receiver_list = receivers.split(',') if isinstance(receivers, str) else [receivers]
+                for receiver in receiver_list:
+                    receiver = receiver.strip()
+                    msg_payload = {
+                        "content": f"Crime type: {payload.get('message', 'Unknown')}\nLocation: {payload.get('location', 'Unknown')}\nFrom: {payload.get('from', 'Unknown')}\nCoordinates: https://www.google.com/maps/search/?api=1&query={payload.get('cords', '').split(' ')[0] if payload.get('cords') else ''}",
+                        "from": sender,
+                        "to": receiver
+                    }
+                    # Send SMS in a separate thread to avoid blocking
+                    threading.Thread(target=self.send_sms, args=[msg_payload], daemon=True).start()
+
+        except Exception as e:
+            print(f"Error processing MQTT message: {str(e)}")
+
+    def on_disconnect(self, client, userdata, rc):
+        """Callback for when MQTT client disconnects"""
+        print(f"Disconnected from MQTT broker with code {rc}")
+
+    def start_mqtt_client(self):
+        """Start the MQTT client"""
+        try:
+            self.setup_mongodb()
+            
+            self.client = mqtt.Client()
+            self.client.on_connect = self.on_connect
+            self.client.on_message = self.on_message
+            self.client.on_disconnect = self.on_disconnect
+            
+            # Connect to MQTT broker
+            print("Connecting to MQTT broker...")
+            self.client.connect("localhost", 1883, 60)
+            
+            # Start the loop in a non-blocking way
+            self.client.loop_forever()
+            
+        except Exception as e:
+            print(f"MQTT client error: {str(e)}")
+            # Retry connection after 30 seconds
+            time.sleep(30)
+            self.start_mqtt_client()
+
+# Initialize MQTT handler
+mqtt_handler = MQTTHandler()
+
+def start_mqtt_service():
+    """Start MQTT service in a separate thread"""
+    print("🚀 Starting MQTT service...")
+    mqtt_handler.start_mqtt_client()
 
 # Helper: Convert MongoDB ObjectId to string and format timestamps
 def serialize_user(user):
@@ -60,9 +195,9 @@ def create_superadmin():
             "createdAt": current_time,
             "updatedAt": current_time
         })
-        print("✅ SuperAdmin created")
+        print("SuperAdmin created")
     else:
-        print("ℹ️ SuperAdmin already exists")
+        print("ℹSuperAdmin already exists")
 
 create_superadmin()
 
@@ -580,11 +715,42 @@ def get_message_analytics():
     except Exception as e:
         return jsonify({"message": f"Error calculating message analytics: {str(e)}"}), 500
 
+# MQTT Status endpoint
+@app.route('/mqtt/status', methods=['GET'])
+@login_required
+def get_mqtt_status():
+    """Get MQTT service status"""
+    current_user = request.user
+    if current_user.get("role") not in ["admin", "SuperAdmin"]:
+        return jsonify({"message": "Unauthorized"}), 403
+    
+    status = {
+        "mqtt_connected": mqtt_handler.client.is_connected() if mqtt_handler.client else False,
+        "mongodb_connected": mqtt_handler.mongo_client is not None,
+        "service_running": True
+    }
+    return jsonify(status), 200
+
 # Home or test endpoint
 @app.route('/', methods=['GET'])
 def home():
-    print(api_key, url, sender, receivers, mongo_db_base)
-    return jsonify({"message": "Welcome to ShieldUp Auth API"}), 200
+    return jsonify({
+        "message": "Welcome to ShieldUp Auth API with MQTT Integration",
+        "services": {
+            "flask_api": "running",
+            "mqtt_client": "running" if mqtt_handler.client else "starting",
+            "sms_service": "enabled" if api_key and url else "disabled"
+        }
+    }), 200
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Start MQTT service in a separate daemon thread
+    mqtt_thread = threading.Thread(target=start_mqtt_service, daemon=True)
+    mqtt_thread.start()
+    
+    print("🚀 Starting Flask application with MQTT integration...")
+    print(f"📱 SMS Service: {'Enabled' if api_key and url else 'Disabled'}")
+    print(f"📊 MongoDB: {'Connected' if mongo_db else 'Not configured'}")
+    
+    # Start Flask app
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
