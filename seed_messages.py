@@ -14,7 +14,7 @@ messages_collection = db["messages"]
 
 # Possible sample values
 names = ["Claire", "John", "Alice", "Ben", "Grace", "Ishimwe", "Eric", "Anna", "David", "Linda"]
-crimes = ["Armed Robbery", "Burglary", "Assault", "Kidnapping", "Vandalism", "Theft", "Domestic Violence"]
+crimes = ["Armed Robbery", "Burglary", "Theft"]
 locations = [
     "Nyarugenge-Gitega-Gitega-Indatwa",
     "Nyarugenge-Gitega-Kanyinya-Kabeza",

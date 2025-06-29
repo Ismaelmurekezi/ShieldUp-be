@@ -610,104 +610,102 @@ def get_message_analytics():
         return jsonify({"message": "Only Admin can view message analytics"}), 403
 
     try:
-        # Get all messages with timestamps
-        messages = list(messages_collection.find())
-        
-        # Calculate time-based statistics
+        user_sector = current_user.get("sector")
+        if not user_sector:
+            return jsonify({"message": "User sector not found"}), 400
+
+        # Get current time for calculations
         now = datetime.datetime.utcnow()
         one_week_ago = now - datetime.timedelta(days=7)
         one_month_ago = now - datetime.timedelta(days=30)
-        
-        # Count messages by time periods
+        two_weeks_ago = now - datetime.timedelta(days=14)
+        two_months_ago = now - datetime.timedelta(days=60)
+
+        # Build aggregation pipeline for sector-specific messages
+        pipeline = [
+            {
+                "$addFields": {
+                    "sector": {
+                        "$arrayElemAt": [
+                            { "$split": ["$payload.location", "-"] },
+                            1
+                        ]
+                    }
+                }
+            },
+            { "$match": { "sector": user_sector.lower() } },
+            { "$sort": { "timestamp": -1 } }
+        ]
+
+        # Execute aggregation
+        sector_messages = list(messages_collection.aggregate(pipeline))
+        total_messages = len(sector_messages)
+
+        # Initialize counters
         weekly_messages = 0
         monthly_messages = 0
-        total_messages = len(messages)
         unread_messages = 0
         acknowledged_messages = 0
-        
-        # Count by status
-        for message in messages:
+        previous_week_messages = 0
+        previous_month_messages = 0
+        crime_types = {}
+        crime_types_by_month = []
+
+        # Process messages for analytics
+        for message in sector_messages:
+            message_date = message.get('timestamp')
+            if isinstance(message_date, str):
+                message_date = datetime.datetime.fromisoformat(message_date.replace('Z', '+00:00'))
+            
+            # Count by status
             if message.get('status') == 'unread':
                 unread_messages += 1
             elif message.get('status') == 'acknowledged':
                 acknowledged_messages += 1
             
             # Count by time period
-            if message.get('timestamp'):
-                message_date = message['timestamp']
-                if isinstance(message_date, str):
-                    message_date = datetime.datetime.fromisoformat(message_date.replace('Z', '+00:00'))
-                
-                if message_date >= one_week_ago:
-                    weekly_messages += 1
-                if message_date >= one_month_ago:
-                    monthly_messages += 1
-        
-        # Monthly data for charts (last 12 months)
-        monthly_data = []
+            if message_date >= one_week_ago:
+                weekly_messages += 1
+            elif two_weeks_ago <= message_date < one_week_ago:
+                previous_week_messages += 1
+            
+            if message_date >= one_month_ago:
+                monthly_messages += 1
+            elif two_months_ago <= message_date < one_month_ago:
+                previous_month_messages += 1
+            
+            # Categorize crime type
+            crime_type = message.get('payload', {}).get('message', 'Unknown').lower()
+            crime_types[crime_type] = crime_types.get(crime_type, 0) + 1
+
+        # Prepare monthly breakdown (last 12 months)
         for i in range(11, -1, -1):
             month_start = datetime.datetime(now.year, now.month - i, 1) if now.month > i else datetime.datetime(now.year - 1, 12 + now.month - i, 1)
-            if i == 0:
-                month_end = now
-            else:
-                next_month = month_start.month + 1 if month_start.month < 12 else 1
-                next_year = month_start.year if month_start.month < 12 else month_start.year + 1
-                month_end = datetime.datetime(next_year, next_month, 1)
+            month_end = datetime.datetime(now.year, now.month - i + 1, 1) if now.month > i else datetime.datetime(now.year - 1, 12 + now.month - i + 1, 1) if i != 0 else now
             
-            month_count = 0
-            for message in messages:
-                if message.get('timestamp'):
-                    message_date = message['timestamp']
-                    if isinstance(message_date, str):
-                        message_date = datetime.datetime.fromisoformat(message_date.replace('Z', '+00:00'))
-                    
-                    if month_start <= message_date < month_end:
-                        month_count += 1
-            monthly_data.append(month_count)
-        
-        # Weekly data for charts (last 7 days)
-        weekly_data = []
-        for i in range(6, -1, -1):
-            day_start = datetime.datetime.combine(now.date() - datetime.timedelta(days=i), datetime.time.min)
-            day_end = day_start + datetime.timedelta(days=1)
-            
-            day_count = 0
-            for message in messages:
-                if message.get('timestamp'):
-                    message_date = message['timestamp']
-                    if isinstance(message_date, str):
-                        message_date = datetime.datetime.fromisoformat(message_date.replace('Z', '+00:00'))
-                    
-                    if day_start <= message_date < day_end:
-                        day_count += 1
-            weekly_data.append(day_count)
-        
-        # Crime type analysis
-        crime_types = {}
-        for message in messages:
-            crime_type = "Unknown"
-            if message.get('payload') and message['payload'].get('message'):
-                crime_type = message['payload']['message']
-            
-            crime_types[crime_type] = crime_types.get(crime_type, 0) + 1
-        
-        # Calculate growth rates
-        previous_week_messages = 0
-        previous_month_messages = 0
-        two_weeks_ago = now - datetime.timedelta(days=14)
-        two_months_ago = now - datetime.timedelta(days=60)
-        
-        for message in messages:
-            if message.get('timestamp'):
-                message_date = message['timestamp']
+            month_data = {
+                "monthIndex": 11 - i,
+                "burglary": 0,
+                "armedRobbery": 0,
+                "theft": 0
+            }
+
+            for message in sector_messages:
+                message_date = message.get('timestamp')
                 if isinstance(message_date, str):
                     message_date = datetime.datetime.fromisoformat(message_date.replace('Z', '+00:00'))
                 
-                if two_weeks_ago <= message_date < one_week_ago:
-                    previous_week_messages += 1
-                if two_months_ago <= message_date < one_month_ago:
-                    previous_month_messages += 1
-        
+                if month_start <= message_date < month_end:
+                    crime_type = message.get('payload', {}).get('message', 'Unknown').lower()
+                    if "burglary" in crime_type:
+                        month_data["burglary"] += 1
+                    elif "armed" in crime_type or "robbery" in crime_type:
+                        month_data["armedRobbery"] += 1
+                    elif "theft" in crime_type:
+                        month_data["theft"] += 1
+            
+            crime_types_by_month.append(month_data)
+
         # Prepare response
         analytics_data = {
             "weeklyMessages": weekly_messages,
@@ -715,13 +713,13 @@ def get_message_analytics():
             "totalMessages": total_messages,
             "unreadMessages": unread_messages,
             "acknowledgedMessages": acknowledged_messages,
-            "monthlyData": monthly_data,
-            "weeklyData": weekly_data,
             "crimeTypes": crime_types,
+            "crimeTypesByMonth": crime_types_by_month,
             "messageGrowthRate": {
                 "weekly": round(((weekly_messages - previous_week_messages) / max(previous_week_messages, 1)) * 100, 2),
                 "monthly": round(((monthly_messages - previous_month_messages) / max(previous_month_messages, 1)) * 100, 2)
-            }
+            },
+            "userSector": user_sector
         }
         
         return jsonify(analytics_data), 200
