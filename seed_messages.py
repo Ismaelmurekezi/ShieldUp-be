@@ -17,10 +17,10 @@ names = ["Claire", "John", "Alice", "Ben", "Grace", "Ishimwe", "Eric", "Anna", "
 crimes = ["Armed Robbery", "Burglary", "Assault", "Kidnapping", "Vandalism", "Theft", "Domestic Violence"]
 locations = [
     "Nyarugenge-Gitega-Gitega-Indatwa",
-    "Kicukiro-Kagarama-Kinyinya-Kabeza",
-    "Gasabo-Remera-Kimironko-Kabuga",
-    "Huye-Ngoma-Tumba-Kayonza",
-    "Musanze-Muhoza-Cyuve-Ruhengeri"
+    "Nyarugenge-Gitega-Kanyinya-Kabeza",
+    "Nyarugenge-Nyamirambo-Kivugiza-Mwurire",
+    "Nyarugenge-Rwezamenyo-Rwezamenyo1-Indatwa",
+    "Nyarugenge-Rwezamenyo-Rwezamenyo1-Abatarushwa"
 ]
 
 # Helper to generate random coordinates and ID suffix

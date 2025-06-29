@@ -400,48 +400,62 @@ def logout():
 def get_all_messages():
     current_user = request.user
     if current_user.get("role") != "admin":
-        return jsonify({"message": "Only Admin can see all messages alert"}), 403
-    
+        return jsonify({"message": "Only Admin can see messages"}), 403
+
     try:
-        # Get pagination parameters
+        user_sector = current_user.get("sector")
+        if not user_sector:
+            return jsonify({"message": "User sector not found"}), 400
+
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 10))
-        
-        # Calculate skip value
         skip = (page - 1) * limit
-        
-        # Get total count
-        total_messages = messages_collection.count_documents({})
-        
-        # Get paginated messages, sorted by timestamp (newest first)
-        messages = list(messages_collection.find()
-                       .sort("timestamp", pymongo.DESCENDING)
-                       .skip(skip)
-                       .limit(limit))
-        
-        # Convert ObjectId to string
-        for message in messages:
-            message["_id"] = str(message["_id"])
-        
-        # Calculate pagination info
-        total_pages = (total_messages + limit - 1) // limit
-        
+
+        pipeline = [
+            {
+                "$addFields": {
+                    "sector": {
+                        "$arrayElemAt": [
+                            { "$split": ["$payload.location", "-"] },
+                            1
+                        ]
+                    }
+                }
+            },
+            { "$match": { "sector": user_sector } },
+            { "$sort": { "timestamp": -1 } },
+            { "$skip": skip },
+            { "$limit": limit }
+        ]
+
+        messages = list(messages_collection.aggregate(pipeline))
+
+        # Update count query to also use payload.location
+        total_filtered = messages_collection.count_documents({
+            "payload.location": { "$regex": f"^[^-]+-{user_sector}-" }
+        })
+
+        for msg in messages:
+            msg["_id"] = str(msg["_id"])
+
+        total_pages = (total_filtered + limit - 1) // limit
         pagination_info = {
             "currentPage": page,
             "totalPages": total_pages,
-            "totalMessages": total_messages,
+            "totalMessages": total_filtered,
             "limit": limit,
             "hasNext": page < total_pages,
             "hasPrev": page > 1
         }
-        
+
         return jsonify({
             "messages": messages,
             "pagination": pagination_info
         }), 200
-        
+
     except Exception as e:
         return jsonify({"message": f"Error fetching messages: {str(e)}"}), 500
+
 
 # Get a single message
 @app.route('/messages/<message_id>', methods=['GET'])
