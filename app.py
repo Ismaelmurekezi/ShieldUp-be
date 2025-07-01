@@ -33,7 +33,7 @@ CORS(app,
          r"/*": {
              "origins": [
                  "http://localhost:5173",  # Your local dev
-                 "https://ibhews.netlify.app/"  # Your deployed frontend
+                 "https://ibhews.netlify.app"  # Your deployed frontend
              ],
              "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
              "allow_headers": ["Content-Type", "Authorization"],
