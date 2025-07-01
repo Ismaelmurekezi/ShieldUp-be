@@ -27,20 +27,16 @@ receivers = os.environ.get("HTTPSMS_RECEIVERS")
 mongo_db_base = os.environ.get("MONGODB_URL_BASE")
 
 app = Flask(__name__)
-CORS(app, 
+CORS(app,
      supports_credentials=True,
-     resources={
-         r"/*": {
-             "origins": [
-                 "http://localhost:5173",  # Your local dev
-                 "https://ibhews.netlify.app"  # Your deployed frontend
-             ],
-             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-             "allow_headers": ["Content-Type", "Authorization"],
-             "expose_headers": ["Content-Type"],
-             "supports_credentials": True
-         }
-     })
+     resources={r"/*": {"origins": [
+         "http://localhost:5173",
+         "https://ibhews.netlify.app"
+     ]}},
+     allow_headers=["Content-Type", "Authorization"],
+     expose_headers=["Content-Type"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+)
 app.config["MONGO_URI"] = mongo_db
 app.config["SECRET_KEY"] = jwt_secret
 
