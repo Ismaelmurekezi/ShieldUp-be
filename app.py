@@ -311,7 +311,20 @@ def login():
         "user": serialize_user(user),
         "token": token
     }))
-    response.set_cookie("access_token", token, httponly=True, secure=True, samesite="Lax")
+    response.headers.add('Access-Control-Allow-Origin', 'https://ibhews.netlify.app')
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    
+    # Set cookie with proper settings for production
+    response.set_cookie(
+        "access_token",
+        token,
+        httponly=True,
+        secure=True,
+        samesite="None",
+        max_age=24*60*60,
+        path='/',
+      
+    )
     return response, 200
 
 # GET ALL USERS ROUTE
