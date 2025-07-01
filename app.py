@@ -631,7 +631,6 @@ def get_message_analytics():
 
         messages = list(messages_collection.aggregate(pipeline))
         
-        # --- Rest of the processing remains mostly unchanged ---
         now = datetime.datetime.utcnow()
         one_week_ago = now - datetime.timedelta(days=7)
         one_month_ago = now - datetime.timedelta(days=30)
@@ -649,6 +648,23 @@ def get_message_analytics():
         crime_types = {}
         previous_week_messages = 0
         previous_month_messages = 0
+
+        # New: Initialize crime types by month
+        crime_types_by_month = {}
+
+        for month_idx in range(12):
+            month_start = datetime.datetime(now.year, now.month - (11 - month_idx), 1) if now.month > (11 - month_idx) else datetime.datetime(now.year - 1, 12 + now.month - (11 - month_idx), 1)
+            month_end = month_start + datetime.timedelta(days=32)
+            month_end = month_end.replace(day=1)
+            
+            month_data = {
+                "monthIndex": month_idx,
+                "burglary": 0,
+                "armedRobbery": 0,
+                "theft": 0
+            }
+            
+            crime_types_by_month[month_idx] = month_data
 
         for message in messages:
             ts = message.get('timestamp')
@@ -689,6 +705,17 @@ def get_message_analytics():
             crime = message.get('payload', {}).get('message', 'Unknown')
             crime_types[crime] = crime_types.get(crime, 0) + 1
 
+            # Categorize crime by type for monthly breakdown
+            crime_lower = crime.lower()
+            month_index = (now.year - ts.year) * 12 + now.month - ts.month
+            if 0 <= month_index < 12:
+                if 'burglary' in crime_lower:
+                    crime_types_by_month[11 - month_index]['burglary'] += 1
+                elif 'armed' in crime_lower or 'robbery' in crime_lower:
+                    crime_types_by_month[11 - month_index]['armedRobbery'] += 1
+                elif 'theft' in crime_lower:
+                    crime_types_by_month[11 - month_index]['theft'] += 1
+
         analytics_data = {
             "weeklyMessages": weekly_messages,
             "monthlyMessages": monthly_messages,
@@ -698,6 +725,7 @@ def get_message_analytics():
             "monthlyData": monthly_data,
             "weeklyData": weekly_data,
             "crimeTypes": crime_types,
+            "crimeTypesByMonth": list(crime_types_by_month.values()),
             "messageGrowthRate": {
                 "weekly": round(((weekly_messages - previous_week_messages) / max(previous_week_messages, 1)) * 100, 2),
                 "monthly": round(((monthly_messages - previous_month_messages) / max(previous_month_messages, 1)) * 100, 2)
@@ -708,6 +736,7 @@ def get_message_analytics():
 
     except Exception as e:
         return jsonify({"message": f"Error calculating message analytics: {str(e)}"}), 500
+
 
 
 # MQTT Status endpoint
