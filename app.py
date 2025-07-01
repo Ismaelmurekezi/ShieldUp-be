@@ -400,48 +400,62 @@ def logout():
 def get_all_messages():
     current_user = request.user
     if current_user.get("role") != "admin":
-        return jsonify({"message": "Only Admin can see all messages alert"}), 403
-    
+        return jsonify({"message": "Only Admin can see messages"}), 403
+
     try:
-        # Get pagination parameters
+        user_sector = current_user.get("sector")
+        if not user_sector:
+            return jsonify({"message": "User sector not found"}), 400
+
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 10))
-        
-        # Calculate skip value
         skip = (page - 1) * limit
-        
-        # Get total count
-        total_messages = messages_collection.count_documents({})
-        
-        # Get paginated messages, sorted by timestamp (newest first)
-        messages = list(messages_collection.find()
-                       .sort("timestamp", pymongo.DESCENDING)
-                       .skip(skip)
-                       .limit(limit))
-        
-        # Convert ObjectId to string
-        for message in messages:
-            message["_id"] = str(message["_id"])
-        
-        # Calculate pagination info
-        total_pages = (total_messages + limit - 1) // limit
-        
+
+        pipeline = [
+            {
+                "$addFields": {
+                    "sector": {
+                        "$arrayElemAt": [
+                            { "$split": ["$payload.location", "-"] },
+                            1
+                        ]
+                    }
+                }
+            },
+            { "$match": { "sector": user_sector } },
+            { "$sort": { "timestamp": -1 } },
+            { "$skip": skip },
+            { "$limit": limit }
+        ]
+
+        messages = list(messages_collection.aggregate(pipeline))
+
+        # Update count query to also use payload.location
+        total_filtered = messages_collection.count_documents({
+            "payload.location": { "$regex": f"^[^-]+-{user_sector}-" }
+        })
+
+        for msg in messages:
+            msg["_id"] = str(msg["_id"])
+
+        total_pages = (total_filtered + limit - 1) // limit
         pagination_info = {
             "currentPage": page,
             "totalPages": total_pages,
-            "totalMessages": total_messages,
+            "totalMessages": total_filtered,
             "limit": limit,
             "hasNext": page < total_pages,
             "hasPrev": page > 1
         }
-        
+
         return jsonify({
             "messages": messages,
             "pagination": pagination_info
         }), 200
-        
+
     except Exception as e:
         return jsonify({"message": f"Error fetching messages: {str(e)}"}), 500
+
 
 # Get a single message
 @app.route('/messages/<message_id>', methods=['GET'])
@@ -596,105 +610,85 @@ def get_message_analytics():
         return jsonify({"message": "Only Admin can view message analytics"}), 403
 
     try:
-        # Get all messages with timestamps
-        messages = list(messages_collection.find())
+        user_sector = current_user.get("sector")
+        if not user_sector:
+            return jsonify({"message": "User sector not found"}), 400
+
+        # Filter messages by sector extracted from payload.location
+        pipeline = [
+            {
+                "$addFields": {
+                    "sector": {
+                        "$arrayElemAt": [
+                            { "$split": ["$payload.location", "-"] },
+                            1
+                        ]
+                    }
+                }
+            },
+            { "$match": { "sector": user_sector } }
+        ]
+
+        messages = list(messages_collection.aggregate(pipeline))
         
-        # Calculate time-based statistics
+        # --- Rest of the processing remains mostly unchanged ---
         now = datetime.datetime.utcnow()
         one_week_ago = now - datetime.timedelta(days=7)
         one_month_ago = now - datetime.timedelta(days=30)
-        
-        # Count messages by time periods
+        two_weeks_ago = now - datetime.timedelta(days=14)
+        two_months_ago = now - datetime.timedelta(days=60)
+
         weekly_messages = 0
         monthly_messages = 0
-        total_messages = len(messages)
         unread_messages = 0
         acknowledged_messages = 0
-        
-        # Count by status
+        total_messages = len(messages)
+
+        monthly_data = [0] * 12
+        weekly_data = [0] * 7
+        crime_types = {}
+        previous_week_messages = 0
+        previous_month_messages = 0
+
         for message in messages:
+            ts = message.get('timestamp')
+            if isinstance(ts, str):
+                ts = datetime.datetime.fromisoformat(ts.replace('Z', '+00:00'))
+
+            if not ts:
+                continue
+
+            # Status counts
             if message.get('status') == 'unread':
                 unread_messages += 1
             elif message.get('status') == 'acknowledged':
                 acknowledged_messages += 1
-            
-            # Count by time period
-            if message.get('timestamp'):
-                message_date = message['timestamp']
-                if isinstance(message_date, str):
-                    message_date = datetime.datetime.fromisoformat(message_date.replace('Z', '+00:00'))
-                
-                if message_date >= one_week_ago:
-                    weekly_messages += 1
-                if message_date >= one_month_ago:
-                    monthly_messages += 1
-        
-        # Monthly data for charts (last 12 months)
-        monthly_data = []
-        for i in range(11, -1, -1):
-            month_start = datetime.datetime(now.year, now.month - i, 1) if now.month > i else datetime.datetime(now.year - 1, 12 + now.month - i, 1)
-            if i == 0:
-                month_end = now
-            else:
-                next_month = month_start.month + 1 if month_start.month < 12 else 1
-                next_year = month_start.year if month_start.month < 12 else month_start.year + 1
-                month_end = datetime.datetime(next_year, next_month, 1)
-            
-            month_count = 0
-            for message in messages:
-                if message.get('timestamp'):
-                    message_date = message['timestamp']
-                    if isinstance(message_date, str):
-                        message_date = datetime.datetime.fromisoformat(message_date.replace('Z', '+00:00'))
-                    
-                    if month_start <= message_date < month_end:
-                        month_count += 1
-            monthly_data.append(month_count)
-        
-        # Weekly data for charts (last 7 days)
-        weekly_data = []
-        for i in range(6, -1, -1):
-            day_start = datetime.datetime.combine(now.date() - datetime.timedelta(days=i), datetime.time.min)
-            day_end = day_start + datetime.timedelta(days=1)
-            
-            day_count = 0
-            for message in messages:
-                if message.get('timestamp'):
-                    message_date = message['timestamp']
-                    if isinstance(message_date, str):
-                        message_date = datetime.datetime.fromisoformat(message_date.replace('Z', '+00:00'))
-                    
-                    if day_start <= message_date < day_end:
-                        day_count += 1
-            weekly_data.append(day_count)
-        
-        # Crime type analysis
-        crime_types = {}
-        for message in messages:
-            crime_type = "Unknown"
-            if message.get('payload') and message['payload'].get('message'):
-                crime_type = message['payload']['message']
-            
-            crime_types[crime_type] = crime_types.get(crime_type, 0) + 1
-        
-        # Calculate growth rates
-        previous_week_messages = 0
-        previous_month_messages = 0
-        two_weeks_ago = now - datetime.timedelta(days=14)
-        two_months_ago = now - datetime.timedelta(days=60)
-        
-        for message in messages:
-            if message.get('timestamp'):
-                message_date = message['timestamp']
-                if isinstance(message_date, str):
-                    message_date = datetime.datetime.fromisoformat(message_date.replace('Z', '+00:00'))
-                
-                if two_weeks_ago <= message_date < one_week_ago:
-                    previous_week_messages += 1
-                if two_months_ago <= message_date < one_month_ago:
-                    previous_month_messages += 1
-        
-        # Prepare response
+
+            # Weekly & monthly counts
+            if ts >= one_week_ago:
+                weekly_messages += 1
+            if ts >= one_month_ago:
+                monthly_messages += 1
+
+            if two_weeks_ago <= ts < one_week_ago:
+                previous_week_messages += 1
+            if two_months_ago <= ts < one_month_ago:
+                previous_month_messages += 1
+
+            # Monthly distribution
+            month_index = (now.year - ts.year) * 12 + now.month - ts.month
+            if 0 <= month_index < 12:
+                monthly_data[11 - month_index] += 1
+
+            # Weekly distribution
+            day_diff = (now.date() - ts.date()).days
+            if 0 <= day_diff < 7:
+                weekly_data[6 - day_diff] += 1
+
+            # Crime type count
+            crime = message.get('payload', {}).get('message', 'Unknown')
+            crime_types[crime] = crime_types.get(crime, 0) + 1
+
         analytics_data = {
             "weeklyMessages": weekly_messages,
             "monthlyMessages": monthly_messages,
@@ -709,11 +703,12 @@ def get_message_analytics():
                 "monthly": round(((monthly_messages - previous_month_messages) / max(previous_month_messages, 1)) * 100, 2)
             }
         }
-        
+
         return jsonify(analytics_data), 200
-        
+
     except Exception as e:
         return jsonify({"message": f"Error calculating message analytics: {str(e)}"}), 500
+
 
 # MQTT Status endpoint
 @app.route('/mqtt/status', methods=['GET'])
