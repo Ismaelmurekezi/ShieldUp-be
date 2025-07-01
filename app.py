@@ -614,14 +614,7 @@ def get_message_analytics():
         if not user_sector:
             return jsonify({"message": "User sector not found"}), 400
 
-        # Get current time for calculations
-        now = datetime.datetime.utcnow()
-        one_week_ago = now - datetime.timedelta(days=7)
-        one_month_ago = now - datetime.timedelta(days=30)
-        two_weeks_ago = now - datetime.timedelta(days=14)
-        two_months_ago = now - datetime.timedelta(days=60)
-
-        # Build aggregation pipeline for sector-specific messages
+        # Filter messages by sector extracted from payload.location
         pipeline = [
             {
                 "$addFields": {
@@ -633,99 +626,89 @@ def get_message_analytics():
                     }
                 }
             },
-            { "$match": { "sector": user_sector.lower() } },
-            { "$sort": { "timestamp": -1 } }
+            { "$match": { "sector": user_sector } }
         ]
 
-        # Execute aggregation
-        sector_messages = list(messages_collection.aggregate(pipeline))
-        total_messages = len(sector_messages)
+        messages = list(messages_collection.aggregate(pipeline))
+        
+        # --- Rest of the processing remains mostly unchanged ---
+        now = datetime.datetime.utcnow()
+        one_week_ago = now - datetime.timedelta(days=7)
+        one_month_ago = now - datetime.timedelta(days=30)
+        two_weeks_ago = now - datetime.timedelta(days=14)
+        two_months_ago = now - datetime.timedelta(days=60)
 
-        # Initialize counters
         weekly_messages = 0
         monthly_messages = 0
         unread_messages = 0
         acknowledged_messages = 0
+        total_messages = len(messages)
+
+        monthly_data = [0] * 12
+        weekly_data = [0] * 7
+        crime_types = {}
         previous_week_messages = 0
         previous_month_messages = 0
-        crime_types = {}
-        crime_types_by_month = []
 
-        # Process messages for analytics
-        for message in sector_messages:
-            message_date = message.get('timestamp')
-            if isinstance(message_date, str):
-                message_date = datetime.datetime.fromisoformat(message_date.replace('Z', '+00:00'))
-            
-            # Count by status
+        for message in messages:
+            ts = message.get('timestamp')
+            if isinstance(ts, str):
+                ts = datetime.datetime.fromisoformat(ts.replace('Z', '+00:00'))
+
+            if not ts:
+                continue
+
+            # Status counts
             if message.get('status') == 'unread':
                 unread_messages += 1
             elif message.get('status') == 'acknowledged':
                 acknowledged_messages += 1
-            
-            # Count by time period
-            if message_date >= one_week_ago:
+
+            # Weekly & monthly counts
+            if ts >= one_week_ago:
                 weekly_messages += 1
-            elif two_weeks_ago <= message_date < one_week_ago:
-                previous_week_messages += 1
-            
-            if message_date >= one_month_ago:
+            if ts >= one_month_ago:
                 monthly_messages += 1
-            elif two_months_ago <= message_date < one_month_ago:
+
+            if two_weeks_ago <= ts < one_week_ago:
+                previous_week_messages += 1
+            if two_months_ago <= ts < one_month_ago:
                 previous_month_messages += 1
-            
-            # Categorize crime type
-            crime_type = message.get('payload', {}).get('message', 'Unknown').lower()
-            crime_types[crime_type] = crime_types.get(crime_type, 0) + 1
 
-        # Prepare monthly breakdown (last 12 months)
-        for i in range(11, -1, -1):
-            month_start = datetime.datetime(now.year, now.month - i, 1) if now.month > i else datetime.datetime(now.year - 1, 12 + now.month - i, 1)
-            month_end = datetime.datetime(now.year, now.month - i + 1, 1) if now.month > i else datetime.datetime(now.year - 1, 12 + now.month - i + 1, 1) if i != 0 else now
-            
-            month_data = {
-                "monthIndex": 11 - i,
-                "burglary": 0,
-                "armedRobbery": 0,
-                "theft": 0
-            }
+            # Monthly distribution
+            month_index = (now.year - ts.year) * 12 + now.month - ts.month
+            if 0 <= month_index < 12:
+                monthly_data[11 - month_index] += 1
 
-            for message in sector_messages:
-                message_date = message.get('timestamp')
-                if isinstance(message_date, str):
-                    message_date = datetime.datetime.fromisoformat(message_date.replace('Z', '+00:00'))
-                
-                if month_start <= message_date < month_end:
-                    crime_type = message.get('payload', {}).get('message', 'Unknown').lower()
-                    if "burglary" in crime_type:
-                        month_data["burglary"] += 1
-                    elif "armed" in crime_type or "robbery" in crime_type:
-                        month_data["armedRobbery"] += 1
-                    elif "theft" in crime_type:
-                        month_data["theft"] += 1
-            
-            crime_types_by_month.append(month_data)
+            # Weekly distribution
+            day_diff = (now.date() - ts.date()).days
+            if 0 <= day_diff < 7:
+                weekly_data[6 - day_diff] += 1
 
-        # Prepare response
+            # Crime type count
+            crime = message.get('payload', {}).get('message', 'Unknown')
+            crime_types[crime] = crime_types.get(crime, 0) + 1
+
         analytics_data = {
             "weeklyMessages": weekly_messages,
             "monthlyMessages": monthly_messages,
             "totalMessages": total_messages,
             "unreadMessages": unread_messages,
             "acknowledgedMessages": acknowledged_messages,
+            "monthlyData": monthly_data,
+            "weeklyData": weekly_data,
             "crimeTypes": crime_types,
-            "crimeTypesByMonth": crime_types_by_month,
             "messageGrowthRate": {
                 "weekly": round(((weekly_messages - previous_week_messages) / max(previous_week_messages, 1)) * 100, 2),
                 "monthly": round(((monthly_messages - previous_month_messages) / max(previous_month_messages, 1)) * 100, 2)
-            },
-            "userSector": user_sector
+            }
         }
-        
+
         return jsonify(analytics_data), 200
-        
+
     except Exception as e:
         return jsonify({"message": f"Error calculating message analytics: {str(e)}"}), 500
+
 
 # MQTT Status endpoint
 @app.route('/mqtt/status', methods=['GET'])
