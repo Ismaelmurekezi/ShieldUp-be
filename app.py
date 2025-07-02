@@ -312,42 +312,54 @@ def login():
     response = make_response(jsonify({
         "message": "Login successful",
         "user": serialize_user(user),
-        "token": token  # Also return token in response body as fallback
+        "token": token
     }))
     
-    # Enhanced CORS headers
+    # Get the origin from the request
     origin = request.headers.get('Origin')
-    if origin in ["http://localhost:5173", "https://ibhews.netlify.app"]:
-        response.headers.add('Access-Control-Allow-Origin', origin)
-        response.headers.add('Access-Control-Allow-Credentials', 'true')
-        response.headers.add('Access-Control-Expose-Headers', 'Set-Cookie')
+    print(f"Request origin: {origin}")
+    print(f"Request host: {request.host}")
     
-    # Detect production environment
-    is_production = 'render.com' in request.host or os.environ.get('FLASK_ENV') == 'production'
+    # Set CORS headers
+    if origin and origin in ["http://localhost:5173", "https://ibhews.netlify.app"]:
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Expose-Headers'] = 'Set-Cookie'
+        print(f"CORS headers set for origin: {origin}")
     
-    # Set cookie with environment-appropriate settings
-    if is_production:
-        response.set_cookie(
-            "access_token",
-            token,
-            httponly=True,
-            secure=True,
-            samesite="None",
-            max_age=24*60*60,
-            path='/'
-        )
-    else:
-        response.set_cookie(
-            "access_token",
-            token,
-            httponly=True,
-            secure=False,
-            samesite="Lax",
-            max_age=24*60*60,
-            path='/'
-        )
+    # Always use production settings for cross-origin cookies
+    # Since you're deploying to Render (HTTPS) and Netlify (HTTPS)
+    response.set_cookie(
+        "access_token",
+        token,
+        httponly=True,
+        secure=True,  # Always True for production HTTPS
+        samesite="None",  # Required for cross-origin
+        max_age=24*60*60,
+        path='/',
+        domain=None  # Don't set domain for cross-origin
+    )
     
+    print(f"Cookie set: access_token with secure=True, samesite=None")
     return response, 200
+
+# Debug endpoint to check cookie and request details
+@app.route('/debug/auth', methods=['GET'])
+def debug_auth():
+    cookies = dict(request.cookies)
+    headers = dict(request.headers)
+    
+    return jsonify({
+        "cookies": cookies,
+        "has_access_token": "access_token" in cookies,
+        "origin": headers.get('Origin'),
+        "host": request.host,
+        "user_agent": headers.get('User-Agent'),
+        "referer": headers.get('Referer'),
+        "is_https": request.is_secure,
+        "scheme": request.scheme,
+        "all_headers": headers
+    })
 
 # GET ALL USERS ROUTE
 @app.route('/users', methods=['GET'])
@@ -431,34 +443,25 @@ def delete_user(user_id):
 def logout():
     response = make_response(jsonify({"message": "Logged out successfully"}))
     
-    # Enhanced CORS headers
+    # Get the origin from the request
     origin = request.headers.get('Origin')
-    if origin in ["http://localhost:5173", "https://ibhews.netlify.app"]:
-        response.headers.add('Access-Control-Allow-Origin', origin)
-        response.headers.add('Access-Control-Allow-Credentials', 'true')
     
-    # Detect production environment
-    is_production = 'render.com' in request.host or os.environ.get('FLASK_ENV') == 'production'
+    # Set CORS headers
+    if origin and origin in ["http://localhost:5173", "https://ibhews.netlify.app"]:
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
     
-    # Clear the JWT cookie with matching settings
-    if is_production:
-        response.set_cookie(
-            "access_token", "", 
-            httponly=True, 
-            secure=True, 
-            samesite="None", 
-            expires=0,
-            path='/'
-        )
-    else:
-        response.set_cookie(
-            "access_token", "", 
-            httponly=True, 
-            secure=False, 
-            samesite="Lax", 
-            expires=0,
-            path='/'
-        )
+    # Clear the JWT cookie with same settings as when it was set
+    response.set_cookie(
+        "access_token", 
+        "", 
+        httponly=True, 
+        secure=True,  # Match the login settings
+        samesite="None",  # Match the login settings
+        expires=0,
+        path='/',
+        domain=None
+    )
     
     return response, 200
 
