@@ -34,7 +34,7 @@ CORS(app,
          "https://ibhews.netlify.app"
      ]}},
      allow_headers=["Content-Type", "Authorization"],
-     expose_headers=["Content-Type"],
+     expose_headers=["Content-Type", "Set-Cookie"],  # Add Set-Cookie here
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 )
 app.config["MONGO_URI"] = mongo_db
@@ -215,6 +215,13 @@ def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         token = request.cookies.get("access_token")
+        
+        # Add fallback to check Authorization header
+        if not token:
+            auth_header = request.headers.get("Authorization")
+            if auth_header and auth_header.startswith("Bearer "):
+                token = auth_header.split(" ")[1]
+        
         if not token:
             return jsonify({"message": "Token is missing"}), 401
 
@@ -305,22 +312,41 @@ def login():
     response = make_response(jsonify({
         "message": "Login successful",
         "user": serialize_user(user),
-        "token": token
+        "token": token  # Also return token in response body as fallback
     }))
-    response.headers.add('Access-Control-Allow-Origin', 'https://ibhews.netlify.app')
-    response.headers.add('Access-Control-Allow-Credentials', 'true')
     
-    # Set cookie with proper settings for production
-    response.set_cookie(
-        "access_token",
-        token,
-        httponly=True,
-        secure=True,
-        samesite="None",
-        max_age=24*60*60,
-        path='/',
-      
-    )
+    # Enhanced CORS headers
+    origin = request.headers.get('Origin')
+    if origin in ["http://localhost:5173", "https://ibhews.netlify.app"]:
+        response.headers.add('Access-Control-Allow-Origin', origin)
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Expose-Headers', 'Set-Cookie')
+    
+    # Detect production environment
+    is_production = 'render.com' in request.host or os.environ.get('FLASK_ENV') == 'production'
+    
+    # Set cookie with environment-appropriate settings
+    if is_production:
+        response.set_cookie(
+            "access_token",
+            token,
+            httponly=True,
+            secure=True,
+            samesite="None",
+            max_age=24*60*60,
+            path='/'
+        )
+    else:
+        response.set_cookie(
+            "access_token",
+            token,
+            httponly=True,
+            secure=False,
+            samesite="Lax",
+            max_age=24*60*60,
+            path='/'
+        )
+    
     return response, 200
 
 # GET ALL USERS ROUTE
@@ -405,14 +431,34 @@ def delete_user(user_id):
 def logout():
     response = make_response(jsonify({"message": "Logged out successfully"}))
     
-    # Clear the JWT cookie
-    response.set_cookie(
-        "access_token", "", 
-        httponly=True, 
-        secure=True, 
-        samesite="Lax", 
-        expires=0  # Expire immediately
-    )
+    # Enhanced CORS headers
+    origin = request.headers.get('Origin')
+    if origin in ["http://localhost:5173", "https://ibhews.netlify.app"]:
+        response.headers.add('Access-Control-Allow-Origin', origin)
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+    
+    # Detect production environment
+    is_production = 'render.com' in request.host or os.environ.get('FLASK_ENV') == 'production'
+    
+    # Clear the JWT cookie with matching settings
+    if is_production:
+        response.set_cookie(
+            "access_token", "", 
+            httponly=True, 
+            secure=True, 
+            samesite="None", 
+            expires=0,
+            path='/'
+        )
+    else:
+        response.set_cookie(
+            "access_token", "", 
+            httponly=True, 
+            secure=False, 
+            samesite="Lax", 
+            expires=0,
+            path='/'
+        )
     
     return response, 200
 
