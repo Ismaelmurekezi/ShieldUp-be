@@ -34,7 +34,7 @@ CORS(app,
          "https://ibhews.netlify.app"
      ]}},
      allow_headers=["Content-Type", "Authorization"],
-     expose_headers=["Content-Type", "Set-Cookie"],  # Add Set-Cookie here
+     expose_headers=["Content-Type", "Set-Cookie"], 
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 )
 app.config["MONGO_URI"] = mongo_db
@@ -327,17 +327,15 @@ def login():
         response.headers['Access-Control-Expose-Headers'] = 'Set-Cookie'
         print(f"CORS headers set for origin: {origin}")
     
-    # Always use production settings for cross-origin cookies
-    # Since you're deploying to Render (HTTPS) and Netlify (HTTPS)
     response.set_cookie(
         "access_token",
         token,
         httponly=True,
-        secure=True,  # Always True for production HTTPS
-        samesite="None",  # Required for cross-origin
+        secure=True, 
+        samesite="None",
         max_age=24*60*60,
         path='/',
-        domain=None  # Don't set domain for cross-origin
+        domain=None 
     )
     
     print(f"Cookie set: access_token with secure=True, samesite=None")
@@ -369,10 +367,45 @@ def get_all_users():
     if current_user.get("role") != "SuperAdmin":
         return jsonify({"message": "Only SuperAdmin can view all users"}), 403
 
-    users = list(users_collection.find({}, {"password": 0}))  # exclude passwords
-    for user in users:
-        user["_id"] = str(user["_id"])
-    return jsonify(users), 200
+    try:
+        # Get pagination parameters from query string
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 10)) 
+        skip = (page - 1) * limit
+
+        # Get total count for pagination info
+        total_users = users_collection.count_documents({})
+
+      
+        users = list(users_collection.find({}, {"password": 0})
+                    .skip(skip)
+                    .limit(limit)
+                    .sort("createdAt", -1))  
+        
+        # Convert ObjectId to string
+        for user in users:
+            user["_id"] = str(user["_id"])
+
+        # Calculate pagination info
+        total_pages = (total_users + limit - 1) // limit
+        pagination_info = {
+            "currentPage": page,
+            "totalPages": total_pages,
+            "totalUsers": total_users,
+            "limit": limit,
+            "hasNext": page < total_pages,
+            "hasPrev": page > 1
+        }
+
+        return jsonify({
+            "users": users,
+            "pagination": pagination_info
+        }), 200
+
+    except ValueError:
+        return jsonify({"message": "Invalid page or limit parameter"}), 400
+    except Exception as e:
+        return jsonify({"message": f"Error fetching users: {str(e)}"}), 500
 
 # GET SINGLE USER ROUTE
 @app.route('/users/<user_id>', methods=['GET'])
@@ -385,7 +418,7 @@ def get_user_by_id(user_id):
     if not ObjectId.is_valid(user_id):
         return jsonify({"message": "Invalid user ID"}), 400
 
-    user = users_collection.find_one({"_id": ObjectId(user_id)}, {"password": 0})  # exclude password
+    user = users_collection.find_one({"_id": ObjectId(user_id)}, {"password": 0}) 
     if not user:
         return jsonify({"message": "User not found"}), 404
 
@@ -456,8 +489,8 @@ def logout():
         "access_token", 
         "", 
         httponly=True, 
-        secure=True,  # Match the login settings
-        samesite="None",  # Match the login settings
+        secure=True, 
+        samesite="None", 
         expires=0,
         path='/',
         domain=None
