@@ -22,8 +22,8 @@ mongo_db = os.environ.get("MONGODB_URL")
 jwt_secret = os.environ.get("JWT_SECRET_KEY")
 api_key = os.environ.get("HTTPSMS_API_KEY")
 url = os.environ.get("HTTPSMS_URL")
-sender = os.environ.get("HTTPSMS_SENDER")
-receivers = os.environ.get("HTTPSMS_RECEIVERS")
+sender = "+250781530573"
+receivers =["+250788911633", "+250791356646","+0783447260"]
 mongo_db_base = os.environ.get("MONGODB_URL_BASE")
 
 app = Flask(__name__)
@@ -126,7 +126,7 @@ class MQTTHandler:
 
             # Send SMS notifications
             if receivers:
-                receiver_list = receivers.split(',') if isinstance(receivers, str) else [receivers]
+                receiver_list = receivers if isinstance(receivers, list) else receivers.split(',')
                 for receiver in receiver_list:
                     receiver = receiver.strip()
                     msg_payload = {
